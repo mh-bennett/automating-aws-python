@@ -1,6 +1,0 @@
-{
-    "python.pythonPath": "/Users/bennem13/.local/share/virtualenvs/01-webotron-Sdcta_f1/bin/python",
-    "python.linting.enabled": true,
-    "python.linting.pylint": true,
-    //"python.linting.pylintArgs": ["--reports", "12", "--disable", "E1011"],
-}
