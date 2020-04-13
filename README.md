@@ -15,3 +15,5 @@ Webotron has the following features:
 -  List all buckets
 
 - List contents of a bucket
+
+- Configure an S3 bucket for static website hosting
