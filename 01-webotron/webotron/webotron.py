@@ -1,103 +1,75 @@
-import boto3
-import sys
-import click
-from botocore.exceptions import ClientError
-from pathlib import Path
-import mimetypes
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
 # pylint: disable=E1101
-# ^ Done due to an incompatibility between pylint and Boto3 Dynamic typing
-session = boto3.Session(profile_name='mb-aws-acct-cli')
-s3 = session.resource('s3')
+"""
+This is the Webotron Script - it takes CLI arguments to set up S3 websites.
+"""
+
+import click
+import boto3
+
+from bucket_manager import BucketManager
+
+SESSION = None
+BUCKET_MANAGER = None
 
 @click.group()
-def cli():
-    # Wraps around child click commands
-    "Webotron deploys websites to AWS"
-    pass 
+@click.option('--profile', default=None,
+    help="Use a given AWS profile")
+def cli(profile):
+    """
+    Webotron deploys websites to AWS.
+    """
+    global SESSION, BUCKET_MANAGER
+    session_cfg = {}
+    if profile:
+        session_cfg['profile_name'] = profile
+        print('Running with the {} AWS profile'.format(profile))
+    SESSION = boto3.Session(**session_cfg) 
+    # **glob <- this is a extensible set of params that maps to a dict.
+    BUCKET_MANAGER = BucketManager(SESSION)
+
 
 @cli.command('list-buckets')
 def list_buckets():
-    "List all S3 buckets"
-    for bucket in s3.buckets.all():
+    """
+    List all S3 buckets.
+    """
+    for bucket in BUCKET_MANAGER.list_buckets():
         print(bucket)
+
 
 @cli.command('list-bucket-objects')
 @click.argument('bucket')
 def list_bucket_objects(bucket):
-    "List objects in an S3 bucket"
-    for obj in s3.Bucket(bucket).objects.all():
+    """
+    List objects in an S3 bucket.
+    """
+    for obj in BUCKET_MANAGER.list_bucket_objects(bucket):
         print(obj)
+
 
 @cli.command('setup-bucket')
 @click.argument('bucket')
 def setup_bucket(bucket):
-    "Create and Configure an S3 bucket for static website hosting"
-    s3_bucket = None
-    try: 
-        s3_bucket = s3.create_bucket(
-            Bucket=bucket, 
-            CreateBucketConfiguration={'LocationConstraint' : session.region_name}
-        )
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
-            s3_bucket =  s3.Bucket(bucket)
-        else:
-            raise e
+    """
+    Create and Configure an S3 bucket for static website hosting.
+    """
+    s3_bucket = BUCKET_MANAGER.init_bucket(bucket)
+    BUCKET_MANAGER.set_bucket_policy(s3_bucket)
+    BUCKET_MANAGER.allow_website(s3_bucket)
 
-    policy = """
-    {
-        "Version":"2012-10-17",
-        "Statement":[{
-            "Sid":"PublicReadGetObject",
-            "Effect":"Allow",
-            "Principal": "*",
-            "Action":["s3:GetObject"],
-            "Resource":["arn:aws:s3:::%s/*"]
-        }]
-    }
-    """ % s3_bucket.name
-    policy =  policy.strip()
-    pol = s3_bucket.Policy()
-    pol.put(Policy=policy)
-
-    web = s3_bucket.Website()
-    web.put(WebsiteConfiguration={
-        'ErrorDocument': {
-            'Key': 'error.html'
-        },
-        'IndexDocument': {
-            'Suffix': 'index.html'
-        }
-    })
-
-    return
-
-#@cli.command('upload_file')
-#@click.command('filename')
-def upload_file(s3_bucket, path, key):
-    content_type = mimetypes.guess_type(key)[0] or 'text/plain'
-    s3_bucket.upload_file(
-        path,
-        key,
-        ExtraArgs={'ContentType': content_type}
-    )
 
 @cli.command('sync')
-@click.argument('bucket')
 @click.argument('pathname', type=click.Path(exists=True))
+@click.argument('bucket')
 def sync(bucket, pathname):
-    "This command syncs the contents of PATHNAME into a BUCKET"
-    
-    s3_bucket = s3.Bucket(bucket)
-    root = Path(pathname).expanduser().resolve()
-    def handle_directory(target):
-        for p in target.iterdir():
-            if p.is_dir(): handle_directory(p)
-            if p.is_file(): upload_file(s3_bucket, str(p), str(p.relative_to(root)))
-            # print("Path {}/n Key: {}".format(p, p.relative_to(root)))
+    """
+    CLI Argument to Sync Files into a specified S3 Bucket.
+    """
+    BUCKET_MANAGER.sync(pathname, bucket)
+    print(BUCKET_MANAGER.get_bucket_url(BUCKET_MANAGER.s3.Bucket(bucket)))
 
-    handle_directory(root)
-    return
 
 if __name__ == "__main__":
     cli()
